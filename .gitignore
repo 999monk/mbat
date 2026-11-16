@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.pyc
+
+# Capturas de tráfico USB (cuando hagamos lo de Windows)
+*.pcap
+*.pcapng
+*.usbmon
+*.log
+
+# Volcados locales
+dump*.txt
+*.bin
+
+# Editor / entorno
+.venv/
+.vscode/
+.idea/

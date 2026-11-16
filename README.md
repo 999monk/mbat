@@ -128,7 +128,6 @@ sudo install -m755 mbat.sh /usr/local/bin/aula-bat
 
 ## Pendiente por verificar
 
-- Comparar el porcentaje con el que muestra el software oficial en Windows (VM con USB passthrough). Mientras la VM tenga el receptor, el mouse no se puede usar en el host.
 - Prueba de descarga: usar el mouse hasta que se apague solo y anotar con qué porcentaje muere. Dice si el número es optimista o ajustado.
 - Significado del byte `F` (flag) del reporte de batería.
 - Escala del valor `V` en los reportes de DPI.

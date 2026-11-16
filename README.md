@@ -2,7 +2,7 @@
 
 Lectura del nivel de batería del mouse **Aula SC380 Pro** en Linux.
 
-**Estado:** experimental, versión inicial. 
+**Estado:** experimental, versión inicial.
 
 El protocolo se dedujo observando lo que el mouse envía por sí solo. No hay documentación oficial, así que todo lo que figura abajo como "observado" es empírico y puede cambiar.
 
@@ -14,9 +14,10 @@ El protocolo se dedujo observando lo que el mouse envía por sí solo. No hay do
 
 **No hace:**
 
-- No envía ningún byte al mouse. Los dos scripts solo leen (`os.read` / `dd` sobre el nodo `hidraw`).
+- No envía ningún byte al mouse: solo lee el nodo `hidraw`.
 - No cambia DPI, iluminación, botones, macros ni perfiles.
-- No notifica, no corre en segundo plano y no guarda nada en disco.
+- No notifica ni guarda nada en disco.
+- No corre en segundo plano. `--watch` queda en primer plano hasta `Ctrl+C`.
 
 ## Entorno probado
 
@@ -26,8 +27,7 @@ El protocolo se dedujo observando lo que el mouse envía por sí solo. No hay do
 | Modo de conexión | Receptor 2.4G |
 | USB ID | `258a:0138` (Sinowealth, "Gaming MS") |
 | Sistema | CachyOS (Linux 7.3.3), shell fish |
-| Dependencias Python | Python 3.10 o superior, solo biblioteca estándar |
-| Dependencias bash | `bash`, `grep`, `dd`, `timeout` (coreutils) y `xxd` |
+| Dependencias | `bash`, `grep`, `dd`, `timeout`, `tr`, `date` y `xxd` |
 
 No se probó en modo cable ni en Bluetooth como fuente de lectura. En la única prueba en Bluetooth no llegó ningún reporte por este canal.
 
@@ -49,21 +49,28 @@ Formato observado de esos reportes (el primer byte es el Report ID):
 Detalles del reporte de batería:
 
 - El mouse lo envía **solo, cada 48 segundos**. No hay forma conocida de pedirlo a demanda.
-- Al reconectarse, primero llega un reporte con `P = 0x64` (100) que **parece un marcador del handshake**, y aproximadamente un segundo después llega el valor real. Los scripts descartan ese primer `100` cuando viene justo después de ver un evento de reconexión.
+- Al reconectarse, primero llega un reporte con `P = 0x64` (100) que **parece un marcador del handshake**, y aproximadamente un segundo después llega el valor real. El script descarta ese `100` solo si llega en los 3 segundos posteriores a un evento de reconexión, para no perder una lectura real de 100%.
 - Mientras el mouse está cargando, el porcentaje reportado sube de forma aparente (se observó 64% a 71% en 48 s, y volvió a 64% al desenchufar el cargador). Por eso conviene leerlo sin el cargador conectado.
 
 **Qué está confirmado y qué no:** el formato de los reportes de enlace y DPI es consistente en todas las capturas. Que `P` sea el porcentaje real de batería es una **hipótesis**: se comporta como una batería (cambia de forma gradual, se mantiene estable en reposo), pero todavía no se comparó con el valor que muestra el software oficial de Windows.
 
-## Scripts
+## Uso
 
-### `mousectl.py` 
+```sh
+mbat                  # espera un reporte y escribe solo el porcentaje
+mbat --watch          # sigue escuchando y muestra eventos con hora
+mbat --timeout 120    # cambia la espera máxima (o TIMEOUT=120 mbat)
+```
 
-Qué hace, en orden:
+**Modo normal (one-shot):** imprime el porcentaje por **stdout** y sale con código 0. Las esperas y los errores van por **stderr**, así que se puede usar en otros scripts:
 
-1. Busca en `/sys/class/hidraw/hidraw*/device/uevent` el nodo cuyo texto contenga `258A` e `input1`.
-2. Abre ese nodo (`/dev/hidrawN`) en solo lectura.
-3. Lee reportes de a uno y descarta todo lo que no sea `09 0a ...` (teclado y multimedia del mismo nodo).
-4. Imprime una línea por cada evento reconocido, con la hora local:
+```sh
+pct=$(mbat 2>/dev/null)
+```
+
+Si pasan 55 segundos sin lectura, imprime `Sin lectura: ¿mouse dormido? Movelo y probá de nuevo.` por stderr y sale con código 1. También sale con código 1 si no encuentra el mouse o si el receptor se desconecta durante la espera.
+
+**Modo `--watch`:** queda escuchando hasta `Ctrl+C` e imprime una línea por evento:
 
 ```
 02:14:33 enlace: conectado
@@ -71,51 +78,31 @@ Qué hace, en orden:
 02:15:21 batería: 63% (flag 1)
 ```
 
-**Modo continuo (por defecto):** sigue escuchando hasta `Ctrl+C`. Si el receptor se desenchufa o no se encuentra, imprime `receptor desconectado, esperando...` y reintenta cada 2 segundos, sin cortarse.
-
-**Modo `--once`:** espera el próximo reporte de batería, lo imprime y termina. Si no llega en 55 segundos, sale con código 1 y el mensaje `sin reporte de batería (¿mouse dormido?)` por stderr. También sale con código 1 si no encuentra el mouse o si el receptor se desconecta durante la espera.
-
-```
-sudo python3 mousectl.py          # continuo
-sudo python3 mousectl.py --once   # una lectura y sale
-```
-
-### `mbat.sh` (bash)
-
-Qué hace, en orden:
-
-1. Busca el nodo `hidraw` cuyo `uevent` tenga `HID_ID` terminado en `258A:00000138` y `HID_PHYS` con `input1`. Es una comprobación más estricta que la del script Python.
-2. Verifica que exista y que tenga permiso de lectura. Si no, sale con un mensaje explicando que falta `sudo` o la regla udev.
-3. Imprime `Esperando lectura (hasta 55s)...` por **stderr**.
-4. Lee reportes de a uno con `dd` y los convierte a hexadecimal con `xxd`.
-5. Ignora todo salvo los eventos de enlace (`090a02`, solo para saber si hay que descartar el marcador) y los de batería (`090a05`).
-6. Al llegar un reporte de batería válido, imprime **solo el porcentaje por stdout** (por ejemplo `63%`) y termina con código 0.
-
-Si pasan 55 segundos sin lectura, imprime `Sin lectura: ¿mouse dormido? Movelo y probá de nuevo.` por stderr y sale con código 1. El tiempo máximo se cambia con la variable `TIMEOUT`:
-
-```
-mbat
-TIMEOUT=120 mbat
-```
-
-Como el porcentaje sale por stdout y los mensajes por stderr, se puede usar en otros scripts: `pct=$(mbat 2>/dev/null)`.
+Si el receptor se desenchufa, avisa y reintenta cada 2 segundos.
 
 ## Instalación
 
-Para usarlos sin `sudo`, hace falta una regla udev que dé acceso al nodo `hidraw`:
+### 1. Regla udev (para leer sin sudo)
 
-```
-echo 'SUBSYSTEM=="hidraw", ATTRS{idVendor}=="258a", ATTRS{idProduct}=="0138", TAG+="uaccess"' | sudo tee /etc/udev/rules.d/99-aula.rules
+```sh
+sudo install -m644 70-aula.rules /etc/udev/rules.d/70-aula.rules
+sudo rm -f /etc/udev/rules.d/99-aula.rules
 sudo udevadm control --reload
-sudo udevadm trigger
+sudo udevadm trigger --subsystem-match=hidraw
 ```
 
-Después hay que desenchufar y volver a enchufar el receptor.
+Después hay que desenchufar y volver a enchufar el receptor. Verificación:
 
-Para instalar el script bash:
-
+```sh
+getfacl /dev/hidrawN    # debe aparecer una entrada ACL para tu usuario
 ```
-sudo install -m755 mbat.sh /usr/local/bin/aula-bat
+
+El nombre `70-` no es casual: el builtin `uaccess` de systemd-udevd se ejecuta en `73-seat-late.rules`. Si la regla se numera después (por ejemplo `99-aula.rules`), el tag se agrega demasiado tarde y el ACL nunca se aplica.
+
+### 2. Script
+
+```sh
+sudo install -m755 mbat.sh /usr/local/bin/mbat
 ```
 
 ## Limitaciones conocidas

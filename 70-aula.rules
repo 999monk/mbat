@@ -1,0 +1,3 @@
+# Aula SC380 Pro (Sinowealth 258a:0138): permitir leer hidraw sin sudo.
+# El número debe ser menor que 73-seat-late.rules para que TAG+="uaccess" se aplique.
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="258a", ATTRS{idProduct}=="0138", TAG+="uaccess"
